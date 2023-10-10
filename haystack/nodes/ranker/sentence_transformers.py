@@ -8,6 +8,7 @@ from haystack.errors import HaystackError
 from haystack.schema import Document
 from haystack.nodes.ranker.base import BaseRanker
 from haystack.lazy_imports import LazyImport
+from haystack.remote_inference import rerank_documents
 
 
 logger = logging.getLogger(__name__)
@@ -57,6 +58,8 @@ class SentenceTransformersRanker(BaseRanker):
         progress_bar: bool = True,
         use_auth_token: Optional[Union[str, bool]] = None,
         embed_meta_fields: Optional[List[str]] = None,
+        remote_ranking_host: Optional[str] = None,
+        remote_ranking_api_key: Optional[str] = None,
     ):
         """
         :param model_name_or_path: Directory of a saved model or the name of a public model e.g.
@@ -82,37 +85,43 @@ class SentenceTransformersRanker(BaseRanker):
         :param embed_meta_fields: Concatenate the provided meta fields and into the text passage that is then used in
             reranking. The original documents are returned so the concatenated metadata is not included in the returned documents.
         """
-        torch_and_transformers_import.check()
-        super().__init__()
-
+        self.remote_ranking_host = None
+        self.remote_ranking_api_key = None
         self.top_k = top_k
-
-        self.devices, _ = initialize_device_settings(devices=devices, use_cuda=use_gpu, multi_gpu=True)
-
-        self.progress_bar = progress_bar
-        self.transformer_model = AutoModelForSequenceClassification.from_pretrained(
-            pretrained_model_name_or_path=model_name_or_path, revision=model_version, use_auth_token=use_auth_token
-        )
-        self.transformer_model.to(str(self.devices[0]))
-        self.transformer_tokenizer = AutoTokenizer.from_pretrained(
-            pretrained_model_name_or_path=model_name_or_path, revision=model_version, use_auth_token=use_auth_token
-        )
-        self.transformer_model.eval()
-
-        # we use sigmoid activation function to scale the score in case there is only a single label
-        # we do not apply any scaling when scale_score is set to False
-        num_labels = self.transformer_model.num_labels
-        self.activation_function: torch.nn.Module
-        if num_labels == 1 and scale_score:
-            self.activation_function = torch.nn.Sigmoid()
-        else:
-            self.activation_function = torch.nn.Identity()
-
-        if len(self.devices) > 1:
-            self.model = DataParallel(self.transformer_model, device_ids=self.devices)
-
         self.batch_size = batch_size
         self.embed_meta_fields = embed_meta_fields
+
+        if remote_ranking_host and remote_ranking_api_key:
+            self.remote_ranking_host = remote_ranking_host
+            self.remote_ranking_api_key = remote_ranking_api_key
+        else:
+            torch_and_transformers_import.check()
+            super().__init__()
+
+            self.devices, _ = initialize_device_settings(devices=devices, use_cuda=use_gpu, multi_gpu=True)
+
+            self.progress_bar = progress_bar
+            self.transformer_model = AutoModelForSequenceClassification.from_pretrained(
+                pretrained_model_name_or_path=model_name_or_path, revision=model_version, use_auth_token=use_auth_token
+            )
+            self.transformer_model.to(str(self.devices[0]))
+            self.transformer_tokenizer = AutoTokenizer.from_pretrained(
+                pretrained_model_name_or_path=model_name_or_path, revision=model_version, use_auth_token=use_auth_token
+            )
+            self.transformer_model.eval()
+
+            # we use sigmoid activation function to scale the score in case there is only a single label
+            # we do not apply any scaling when scale_score is set to False
+            num_labels = self.transformer_model.num_labels
+            self.activation_function: torch.nn.Module
+            if num_labels == 1 and scale_score:
+                self.activation_function = torch.nn.Sigmoid()
+            else:
+                self.activation_function = torch.nn.Identity()
+
+            if len(self.devices) > 1:
+                self.model = DataParallel(self.transformer_model, device_ids=self.devices)
+
 
     def predict(self, query: str, documents: List[Document], top_k: Optional[int] = None) -> List[Document]:
         """
@@ -125,35 +134,52 @@ class SentenceTransformersRanker(BaseRanker):
         :param top_k: The maximum number of documents to return
         :return: List of Document
         """
-        if top_k is None:
-            top_k = self.top_k
+        if self.remote_ranking_host and self.remote_ranking_api_key:
+            docs = {}
+            for doc in documents:
+                docs[doc.id] = {'content': doc.content}
 
-        docs_with_meta_fields = self._add_meta_fields_to_docs(
-            documents=documents, embed_meta_fields=self.embed_meta_fields
-        )
-        docs = [doc.content for doc in docs_with_meta_fields]
-        features = self.transformer_tokenizer(
-            [query for _ in documents], docs, padding=True, truncation=True, return_tensors="pt"
-        ).to(self.devices[0])
+            reranked_documents = rerank_documents(host=self.remote_ranking_host,
+                                                  api_key=self.remote_ranking_api_key,
+                                                  query=query,
+                                                  documents=docs)
+            out_docs = [doc for doc in documents if doc.id in reranked_documents]
+            for doc in out_docs:
+                doc.score = reranked_documents[doc.id]['score']
+            
+            out_docs = sorted(out_docs, key=lambda x: x.score, reverse=True)
+            
+            return out_docs
+        else:
+            if top_k is None:
+                top_k = self.top_k
 
-        # SentenceTransformerRanker uses:
-        # 1. the logit as similarity score/answerable classification
-        # 2. the logits as answerable classification  (no_answer / has_answer)
-        # https://www.sbert.net/docs/pretrained-models/ce-msmarco.html#usage-with-transformers
-        with torch.inference_mode():
-            similarity_scores = self.transformer_model(**features).logits
+            docs_with_meta_fields = self._add_meta_fields_to_docs(
+                documents=documents, embed_meta_fields=self.embed_meta_fields
+            )
+            docs = [doc.content for doc in docs_with_meta_fields]
+            features = self.transformer_tokenizer(
+                [query for _ in documents], docs, padding=True, truncation=True, return_tensors="pt"
+            ).to(self.devices[0])
 
-        logits_dim = similarity_scores.shape[1]  # [batch_size, logits_dim]
-        sorted_scores_and_documents = sorted(
-            zip(similarity_scores, documents),
-            key=lambda similarity_document_tuple:
-            # assume the last element in logits represents the `has_answer` label
-            similarity_document_tuple[0][-1] if logits_dim >= 2 else similarity_document_tuple[0],
-            reverse=True,
-        )
+            # SentenceTransformerRanker uses:
+            # 1. the logit as similarity score/answerable classification
+            # 2. the logits as answerable classification  (no_answer / has_answer)
+            # https://www.sbert.net/docs/pretrained-models/ce-msmarco.html#usage-with-transformers
+            with torch.inference_mode():
+                similarity_scores = self.transformer_model(**features).logits
 
-        # add normalized scores to documents
-        sorted_documents = self._add_scores_to_documents(sorted_scores_and_documents[:top_k], logits_dim)
+            logits_dim = similarity_scores.shape[1]  # [batch_size, logits_dim]
+            sorted_scores_and_documents = sorted(
+                zip(similarity_scores, documents),
+                key=lambda similarity_document_tuple:
+                # assume the last element in logits represents the `has_answer` label
+                similarity_document_tuple[0][-1] if logits_dim >= 2 else similarity_document_tuple[0],
+                reverse=True,
+            )
+
+            # add normalized scores to documents
+            sorted_documents = self._add_scores_to_documents(sorted_scores_and_documents[:top_k], logits_dim)
 
         return sorted_documents
 

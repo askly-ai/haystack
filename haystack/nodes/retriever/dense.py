@@ -1466,6 +1466,8 @@ class EmbeddingRetriever(DenseRetriever):
         azure_deployment_name: Optional[str] = None,
         api_base: str = "https://api.openai.com/v1",
         openai_organization: Optional[str] = None,
+        remote_embedding_host: Optional[str] = None,
+        remote_embedding_api_key: Optional[str] = None,
     ):
         """
         :param document_store: An instance of DocumentStore from which to retrieve documents.
@@ -1529,16 +1531,16 @@ class EmbeddingRetriever(DenseRetriever):
         :param openai_organization: The OpenAI-Organization ID, defaults to `None`. For more details, see OpenAI
         [documentation](https://platform.openai.com/docs/api-reference/requesting-organization).
         """
-        torch_and_transformers_import.check()
+
+        if (not remote_embedding_host) or (not remote_embedding_api_key):
+            torch_and_transformers_import.check()
+            self.devices, _ = initialize_device_settings(devices=devices, use_cuda=use_gpu, multi_gpu=True)
+            if batch_size < len(self.devices):
+                logger.warning("Batch size is less than the number of devices.All gpus will not be utilized.")
 
         if embed_meta_fields is None:
             embed_meta_fields = []
         super().__init__()
-
-        self.devices, _ = initialize_device_settings(devices=devices, use_cuda=use_gpu, multi_gpu=True)
-
-        if batch_size < len(self.devices):
-            logger.warning("Batch size is less than the number of devices.All gpus will not be utilized.")
 
         self.document_store = document_store
         self.embedding_model = embedding_model
@@ -1582,7 +1584,9 @@ class EmbeddingRetriever(DenseRetriever):
                 self.model_format,
             )
 
-        self.embedding_encoder = _EMBEDDING_ENCODERS[self.model_format](retriever=self)
+        self.remote_embedding_host = remote_embedding_host
+        self.remote_embedding_api_key = remote_embedding_api_key
+        self.embedding_encoder = _EMBEDDING_ENCODERS[self.model_format](retriever=self, remote_embedding_host=self.remote_embedding_host, remote_embedding_api_key=self.remote_embedding_api_key)
         self.embed_meta_fields = embed_meta_fields
 
     def retrieve(
@@ -1828,7 +1832,7 @@ class EmbeddingRetriever(DenseRetriever):
         if isinstance(queries, str):
             queries = [queries]
         assert isinstance(queries, list), "Expecting a list of texts, i.e. create_embeddings(texts=['text1',...])"
-        return self.embedding_encoder.embed_queries(queries)
+        return self.embedding_encoder.embed_queries(queries, self.remote_embedding_host, self.remote_embedding_api_key)
 
     def embed_documents(self, documents: List[Document]) -> np.ndarray:
         """
@@ -1838,7 +1842,7 @@ class EmbeddingRetriever(DenseRetriever):
         :return: Embeddings, one per input document, shape: (docs, embedding_dim)
         """
         documents = self._preprocess_documents(documents)
-        return self.embedding_encoder.embed_documents(documents)
+        return self.embedding_encoder.embed_documents(documents, self.remote_embedding_host, self.remote_embedding_api_key)
 
     def _preprocess_documents(self, docs: List[Document]) -> List[Document]:
         """

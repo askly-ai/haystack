@@ -21,6 +21,7 @@ from haystack.nodes.retriever._openai_encoder import _OpenAIEmbeddingEncoder
 from haystack.schema import Document
 from haystack.telemetry import send_event
 from haystack.lazy_imports import LazyImport
+from haystack.remote_inference import get_embeddings
 
 from ._base_embedding_encoder import _BaseEmbeddingEncoder
 
@@ -117,39 +118,43 @@ class _DefaultEmbeddingEncoder(_BaseEmbeddingEncoder):
 
 
 class _SentenceTransformersEmbeddingEncoder(_BaseEmbeddingEncoder):
-    def __init__(self, retriever: "EmbeddingRetriever"):
+    def __init__(self, retriever: "EmbeddingRetriever", remote_embedding_host: Optional[str] = None, remote_embedding_api_key: Optional[str] = None):
         # pretrained embedding models coming from: https://github.com/UKPLab/sentence-transformers#pretrained-models
         # e.g. 'roberta-base-nli-stsb-mean-tokens'
-        torch_and_transformers_import.check()
-        self.embedding_model = SentenceTransformer(
-            retriever.embedding_model, device=str(retriever.devices[0]), use_auth_token=retriever.use_auth_token
-        )
-        self.batch_size = retriever.batch_size
-        self.embedding_model.max_seq_length = retriever.max_seq_len
-        self.show_progress_bar = retriever.progress_bar
+        if (not remote_embedding_host) or (not remote_embedding_api_key):
+            torch_and_transformers_import.check()
+            self.embedding_model = SentenceTransformer(
+                retriever.embedding_model, device=str(retriever.devices[0]), use_auth_token=retriever.use_auth_token
+            )
+            self.batch_size = retriever.batch_size
+            self.embedding_model.max_seq_length = retriever.max_seq_len
+            self.show_progress_bar = retriever.progress_bar
         if retriever.document_store:
             self._check_docstore_similarity_function(
                 document_store=retriever.document_store, model_name=retriever.embedding_model
             )
 
-    def embed(self, texts: Union[List[str], str]) -> np.ndarray:
+    def embed(self, texts: Union[List[str], str], remote_embedding_host: Optional[str] = None, remote_embedding_api_key: Optional[str] = None) -> np.ndarray:
         # texts can be a list of strings
         # get back list of numpy embedding vectors
-        emb = self.embedding_model.encode(
-            texts, batch_size=self.batch_size, show_progress_bar=self.show_progress_bar, convert_to_numpy=True
-        )
+        if remote_embedding_host and remote_embedding_api_key:
+            emb = np.array(get_embeddings(remote_embedding_host, remote_embedding_api_key, texts))
+        else:
+            emb = self.embedding_model.encode(
+                texts, batch_size=self.batch_size, show_progress_bar=self.show_progress_bar, convert_to_numpy=True
+            )
         return emb
 
-    def embed_queries(self, queries: List[str]) -> np.ndarray:
+    def embed_queries(self, queries: List[str], remote_embedding_host: Optional[str] = None, remote_embedding_api_key: Optional[str] = None) -> np.ndarray:
         """
         Create embeddings for a list of queries.
 
         :param queries: List of queries to embed.
         :return: Embeddings, one per input query, shape: (queries, embedding_dim)
         """
-        return self.embed(queries)
+        return self.embed(queries, remote_embedding_host, remote_embedding_api_key)
 
-    def embed_documents(self, docs: List[Document]) -> np.ndarray:
+    def embed_documents(self, docs: List[Document], remote_embedding_host: Optional[str] = None, remote_embedding_api_key: Optional[str] = None) -> np.ndarray:
         """
         Create embeddings for a list of documents.
 
@@ -157,7 +162,7 @@ class _SentenceTransformersEmbeddingEncoder(_BaseEmbeddingEncoder):
         :return: Embeddings, one per input document, shape: (documents, embedding_dim)
         """
         passages = [d.content for d in docs]
-        return self.embed(passages)
+        return self.embed(passages, remote_embedding_host, remote_embedding_api_key)
 
     def train(
         self,
