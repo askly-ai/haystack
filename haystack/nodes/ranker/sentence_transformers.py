@@ -134,6 +134,9 @@ class SentenceTransformersRanker(BaseRanker):
         :param top_k: The maximum number of documents to return
         :return: List of Document
         """
+        if top_k is None:
+            top_k = self.top_k
+
         if self.remote_ranking_host and self.remote_ranking_api_key:
             docs = {}
             for doc in documents:
@@ -142,7 +145,8 @@ class SentenceTransformersRanker(BaseRanker):
             reranked_documents = rerank_documents(host=self.remote_ranking_host,
                                                   api_key=self.remote_ranking_api_key,
                                                   query=query,
-                                                  documents=docs)
+                                                  documents=docs,
+                                                  top_k=top_k)
             out_docs = [doc for doc in documents if doc.id in reranked_documents]
             for doc in out_docs:
                 doc.score = reranked_documents[doc.id]['score']
@@ -151,8 +155,6 @@ class SentenceTransformersRanker(BaseRanker):
             
             return out_docs
         else:
-            if top_k is None:
-                top_k = self.top_k
 
             docs_with_meta_fields = self._add_meta_fields_to_docs(
                 documents=documents, embed_meta_fields=self.embed_meta_fields

@@ -29,7 +29,7 @@ def get_embeddings(host: str, api_key: str, text_list: List[str]) -> Union[List[
 
 
 @retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(3))
-def rerank_documents(host: str, api_key: str, query: str, documents: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+def rerank_documents(host: str, api_key: str, query: str, documents: Dict[str, Any], top_k: int) -> Dict[str, Dict[str, Any]]:
     url = f"{host}/ml/rerank/"
     headers = {
         "API-Key": api_key,
@@ -37,7 +37,8 @@ def rerank_documents(host: str, api_key: str, query: str, documents: Dict[str, A
     }
     payload = {
         "query": query,
-        "documents": documents
+        "documents": documents,
+        "top_k": top_k
     }
 
     response = requests.post(url, headers=headers, json=payload)
