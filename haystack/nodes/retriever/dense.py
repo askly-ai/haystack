@@ -1586,7 +1586,11 @@ class EmbeddingRetriever(DenseRetriever):
 
         self.remote_embedding_host = remote_embedding_host
         self.remote_embedding_api_key = remote_embedding_api_key
-        self.embedding_encoder = _EMBEDDING_ENCODERS[self.model_format](retriever=self, remote_embedding_host=self.remote_embedding_host, remote_embedding_api_key=self.remote_embedding_api_key)
+        self.embedding_encoder = _EMBEDDING_ENCODERS[self.model_format](
+            retriever=self,
+            remote_embedding_host=self.remote_embedding_host,
+            remote_embedding_api_key=self.remote_embedding_api_key,
+        )
         self.embed_meta_fields = embed_meta_fields
 
     def retrieve(
@@ -1842,7 +1846,9 @@ class EmbeddingRetriever(DenseRetriever):
         :return: Embeddings, one per input document, shape: (docs, embedding_dim)
         """
         documents = self._preprocess_documents(documents)
-        return self.embedding_encoder.embed_documents(documents, self.remote_embedding_host, self.remote_embedding_api_key)
+        return self.embedding_encoder.embed_documents(
+            documents, self.remote_embedding_host, self.remote_embedding_api_key
+        )
 
     def _preprocess_documents(self, docs: List[Document]) -> List[Document]:
         """

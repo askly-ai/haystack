@@ -122,7 +122,6 @@ class SentenceTransformersRanker(BaseRanker):
             if len(self.devices) > 1:
                 self.model = DataParallel(self.transformer_model, device_ids=self.devices)
 
-
     def predict(self, query: str, documents: List[Document], top_k: Optional[int] = None) -> List[Document]:
         """
         Use loaded ranker model to re-rank the supplied list of Document.
@@ -140,22 +139,23 @@ class SentenceTransformersRanker(BaseRanker):
         if self.remote_ranking_host and self.remote_ranking_api_key:
             docs = {}
             for doc in documents:
-                docs[doc.id] = {'content': doc.content}
+                docs[doc.id] = {"content": doc.content}
 
-            reranked_documents = rerank_documents(host=self.remote_ranking_host,
-                                                  api_key=self.remote_ranking_api_key,
-                                                  query=query,
-                                                  documents=docs,
-                                                  top_k=top_k)
+            reranked_documents = rerank_documents(
+                host=self.remote_ranking_host,
+                api_key=self.remote_ranking_api_key,
+                query=query,
+                documents=docs,
+                top_k=top_k,
+            )
             out_docs = [doc for doc in documents if doc.id in reranked_documents]
             for doc in out_docs:
-                doc.score = reranked_documents[doc.id]['score']
-            
+                doc.score = reranked_documents[doc.id]["score"]
+
             out_docs = sorted(out_docs, key=lambda x: x.score, reverse=True)
-            
+
             return out_docs
         else:
-
             docs_with_meta_fields = self._add_meta_fields_to_docs(
                 documents=documents, embed_meta_fields=self.embed_meta_fields
             )

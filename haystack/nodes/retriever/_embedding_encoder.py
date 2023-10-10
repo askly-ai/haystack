@@ -118,7 +118,12 @@ class _DefaultEmbeddingEncoder(_BaseEmbeddingEncoder):
 
 
 class _SentenceTransformersEmbeddingEncoder(_BaseEmbeddingEncoder):
-    def __init__(self, retriever: "EmbeddingRetriever", remote_embedding_host: Optional[str] = None, remote_embedding_api_key: Optional[str] = None):
+    def __init__(
+        self,
+        retriever: "EmbeddingRetriever",
+        remote_embedding_host: Optional[str] = None,
+        remote_embedding_api_key: Optional[str] = None,
+    ):
         # pretrained embedding models coming from: https://github.com/UKPLab/sentence-transformers#pretrained-models
         # e.g. 'roberta-base-nli-stsb-mean-tokens'
         if (not remote_embedding_host) or (not remote_embedding_api_key):
@@ -134,7 +139,12 @@ class _SentenceTransformersEmbeddingEncoder(_BaseEmbeddingEncoder):
                 document_store=retriever.document_store, model_name=retriever.embedding_model
             )
 
-    def embed(self, texts: Union[List[str], str], remote_embedding_host: Optional[str] = None, remote_embedding_api_key: Optional[str] = None) -> np.ndarray:
+    def embed(
+        self,
+        texts: Union[List[str], str],
+        remote_embedding_host: Optional[str] = None,
+        remote_embedding_api_key: Optional[str] = None,
+    ) -> np.ndarray:
         # texts can be a list of strings
         # get back list of numpy embedding vectors
         if remote_embedding_host and remote_embedding_api_key:
@@ -145,7 +155,12 @@ class _SentenceTransformersEmbeddingEncoder(_BaseEmbeddingEncoder):
             )
         return emb
 
-    def embed_queries(self, queries: List[str], remote_embedding_host: Optional[str] = None, remote_embedding_api_key: Optional[str] = None) -> np.ndarray:
+    def embed_queries(
+        self,
+        queries: List[str],
+        remote_embedding_host: Optional[str] = None,
+        remote_embedding_api_key: Optional[str] = None,
+    ) -> np.ndarray:
         """
         Create embeddings for a list of queries.
 
@@ -154,7 +169,12 @@ class _SentenceTransformersEmbeddingEncoder(_BaseEmbeddingEncoder):
         """
         return self.embed(queries, remote_embedding_host, remote_embedding_api_key)
 
-    def embed_documents(self, docs: List[Document], remote_embedding_host: Optional[str] = None, remote_embedding_api_key: Optional[str] = None) -> np.ndarray:
+    def embed_documents(
+        self,
+        docs: List[Document],
+        remote_embedding_host: Optional[str] = None,
+        remote_embedding_api_key: Optional[str] = None,
+    ) -> np.ndarray:
         """
         Create embeddings for a list of documents.
 
