@@ -1,27 +1,35 @@
 import requests
 from typing import List, Union, Dict, Any
 from tenacity import retry, wait_random_exponential, stop_after_attempt
+import numpy as np
 
 
 @retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(3))
-def get_embeddings(host: str, api_key: str, text_list: List[str]) -> Union[List[List[float]], None]:
-    # Construct the API URL
-    api_url = f"{host}/ml/embedding/"
+def get_embeddings(host: str, api_key: str, text_list: List[str], batch_size=64) -> Union[np.ndarray, None]:
+    total_embeddings = []
 
-    # Prepare headers
-    headers = {"API-Key": api_key, "Content-Type": "application/json"}
+    for i in range(0, len(text_list), batch_size):
+        batch_texts = text_list[i : i + batch_size]
 
-    # Prepare payload
-    payload = {"texts": text_list}
+        # Construct the API URL
+        api_url = f"{host}/ml/embedding/"
 
-    # Make the API request
-    response = requests.post(api_url, json=payload, headers=headers)
+        # Prepare headers
+        headers = {"API-Key": api_key, "Content-Type": "application/json"}
 
-    # Raise an exception for unsuccessful status codes
-    response.raise_for_status()
+        # Prepare payload
+        payload = {"texts": batch_texts}
 
-    # Check if request was successful
-    return response.json()
+        # Make the API request
+        response = requests.post(api_url, json=payload, headers=headers)
+
+        # Raise an exception for unsuccessful status codes
+        response.raise_for_status()
+
+        # Accumulate results
+        total_embeddings.extend(response.json())
+
+    return np.array(total_embeddings)
 
 
 @retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(3))

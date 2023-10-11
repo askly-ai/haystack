@@ -126,14 +126,15 @@ class _SentenceTransformersEmbeddingEncoder(_BaseEmbeddingEncoder):
     ):
         # pretrained embedding models coming from: https://github.com/UKPLab/sentence-transformers#pretrained-models
         # e.g. 'roberta-base-nli-stsb-mean-tokens'
+        self.batch_size = retriever.batch_size
+        self.show_progress_bar = retriever.progress_bar
+
         if (not remote_embedding_host) or (not remote_embedding_api_key):
             torch_and_transformers_import.check()
             self.embedding_model = SentenceTransformer(
                 retriever.embedding_model, device=str(retriever.devices[0]), use_auth_token=retriever.use_auth_token
             )
-            self.batch_size = retriever.batch_size
             self.embedding_model.max_seq_length = retriever.max_seq_len
-            self.show_progress_bar = retriever.progress_bar
         if retriever.document_store:
             self._check_docstore_similarity_function(
                 document_store=retriever.document_store, model_name=retriever.embedding_model
@@ -145,10 +146,11 @@ class _SentenceTransformersEmbeddingEncoder(_BaseEmbeddingEncoder):
         remote_embedding_host: Optional[str] = None,
         remote_embedding_api_key: Optional[str] = None,
     ) -> np.ndarray:
-        # texts can be a list of strings
-        # get back list of numpy embedding vectors
+        if isinstance(texts, str):
+            texts = [texts]
+
         if remote_embedding_host and remote_embedding_api_key:
-            emb = np.array(get_embeddings(remote_embedding_host, remote_embedding_api_key, texts))
+            emb = get_embeddings(remote_embedding_host, remote_embedding_api_key, texts, batch_size=self.batch_size)
         else:
             emb = self.embedding_model.encode(
                 texts, batch_size=self.batch_size, show_progress_bar=self.show_progress_bar, convert_to_numpy=True
