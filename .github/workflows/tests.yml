@@ -19,6 +19,7 @@ on:
       - "pyproject.toml"
       - "!haystack/preview/**/*.py"  # See tests_preview.yml
       - "!test/preview/**/*.py"  # See tests_preview.yml
+      - "!e2e/preview/**/*.py"  # See e2e_preview.yml
       - "!.github/**/*.py"
       - "!rest_api/**/*.py"
       - "!docs/**/*.py"
@@ -124,10 +125,10 @@ jobs:
         include:
           - topic: document_stores
             os: ubuntu-latest
-            dependencies: elasticsearch8,faiss,weaviate,pinecone,opensearch,inference,audio,crawler,preprocessing,file-conversion,pdf,ocr,ray,onnx,beir,metrics,aws,dev
+            dependencies: elasticsearch8,faiss,weaviate,pinecone,opensearch,inference,crawler,preprocessing,file-conversion,pdf,ocr,metrics,dev
           - topic: document_stores
             os: windows-latest
-            dependencies: elasticsearch8,faiss,weaviate,pinecone,opensearch,inference,audio,crawler,preprocessing,file-conversion,pdf,ocr,ray,onnx,beir,metrics,aws,dev
+            dependencies: elasticsearch8,faiss,weaviate,pinecone,opensearch,inference,crawler,preprocessing,file-conversion,pdf,ocr,metrics,dev
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -201,7 +202,9 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install Haystack
-        run: pip install .[preview,dev] langdetect transformers[torch,sentencepiece]==4.32.1 sentence-transformers>=2.2.0 pypdf openai-whisper tika 'azure-ai-formrecognizer>=3.2.0b2'
+        run: |
+          pip install .[dev,preview] langdetect transformers[torch,sentencepiece]==4.34.1 'sentence-transformers>=2.2.0' pypdf tika 'azure-ai-formrecognizer>=3.2.0b2'
+          pip install --no-deps llvmlite numba 'openai-whisper>=20230918'  # prevent outdated version of tiktoken pinned by openai-whisper
 
       - name: Run
         run: pytest --cov-report xml:coverage.xml --cov="haystack" -m "unit" test/preview
@@ -329,7 +332,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     services:
       elasticsearch:
-        image: elasticsearch:8.8.0
+        image: elasticsearch:8.10.2
         env:
           discovery.type: "single-node"
           xpack.security.enabled: "false"
@@ -346,9 +349,36 @@ jobs:
       - name: Install Haystack
         run: pip install .[elasticsearch8,dev,preprocessing,inference]
 
+      - name: Make elasticsearch comfortable with a disk almost full
+        run: |
+          curl -X PUT "localhost:9200/_cluster/settings?pretty" -H 'Content-Type: application/json' -d'
+          {
+            "persistent": {
+              "cluster.routing.allocation.disk.watermark.low": "90%",
+              "cluster.routing.allocation.disk.watermark.low.max_headroom": "100GB",
+              "cluster.routing.allocation.disk.watermark.high": "95%",
+              "cluster.routing.allocation.disk.watermark.high.max_headroom": "20GB",
+              "cluster.routing.allocation.disk.watermark.flood_stage": "97%",
+              "cluster.routing.allocation.disk.watermark.flood_stage.max_headroom": "5GB",
+              "cluster.routing.allocation.disk.watermark.flood_stage.frozen": "97%",
+              "cluster.routing.allocation.disk.watermark.flood_stage.frozen.max_headroom": "5GB"
+            }
+          }
+          '
+          curl -X PUT "localhost:9200/*/_settings?expand_wildcards=all&pretty" -H 'Content-Type: application/json' -d'
+          {
+            "index.blocks.read_only_allow_delete": null
+          }
+          '
+
       - name: Run tests
         run: |
-          pytest --maxfail=5 -m "document_store and integration" test/document_stores/test_elasticsearch.py
+          pytest -x -m"document_store and integration" test/document_stores/test_elasticsearch.py
+
+      - name: logs
+        if: failure()
+        run: |
+          docker logs "${{ job.services.elasticsearch.id }}"
 
       - name: Calculate alert data
         id: calculator
@@ -918,7 +948,9 @@ jobs:
           sudo apt install ffmpeg  # for local Whisper tests
 
       - name: Install Haystack
-        run: pip install .[dev,preview] langdetect transformers[torch,sentencepiece]==4.32.1 'sentence-transformers>=2.2.0' pypdf openai-whisper tika 'azure-ai-formrecognizer>=3.2.0b2'
+        run: |
+          pip install .[dev,preview] langdetect transformers[torch,sentencepiece]==4.34.1 'sentence-transformers>=2.2.0' pypdf tika 'azure-ai-formrecognizer>=3.2.0b2'
+          pip install --no-deps llvmlite numba 'openai-whisper>=20230918'  # prevent outdated version of tiktoken pinned by openai-whisper
 
       - name: Run tests
         run: |
